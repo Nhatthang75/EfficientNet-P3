@@ -94,6 +94,7 @@ def startup_event():
         print(f"[WARNING] Startup predictor deferred: {e}")
 
 @app.get("/")
+@app.head("/")
 def root():
     return {
         "message": "AI DR API Service (EfficientNet-B4-CBAM) is running.",
