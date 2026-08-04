@@ -12,6 +12,10 @@ import cv2
 import numpy as np
 from PIL import Image
 import torch
+# Disable multi-threading memory overhead in PyTorch
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+torch.set_grad_enabled(False)
 from torchvision import transforms
 
 TARGET_SIZE = (224, 224)
@@ -406,6 +410,10 @@ class DRPredictor:
         else:
             state_dict = checkpoint
             
+        del checkpoint
+        import gc
+        gc.collect()
+            
         self.model.load_state_dict(state_dict)
         self.model.to(self.device)
         self.model.eval()
@@ -415,7 +423,6 @@ class DRPredictor:
         
         # Free memory immediately to avoid Render OOM
         del state_dict
-        del checkpoint
         import gc
         gc.collect()
 
