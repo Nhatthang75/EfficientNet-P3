@@ -61,9 +61,9 @@ if uploaded_file is not None:
     file_bytes = uploaded_file.read()
     image = Image.open(uploaded_file)
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.subheader("Ảnh gốc đã tải lên")
+        st.subheader("Ảnh gốc")
         st.image(image, use_column_width=True)
         
     with st.spinner("AI đang thực hiện chẩn đoán..."):
@@ -73,8 +73,13 @@ if uploaded_file is not None:
         result = predictor.predict(file_bytes, use_ben_graham=True)
         
     with col2:
-        st.subheader("Ảnh đã tiền xử lý (Ben Graham)")
+        st.subheader("Tiền xử lý")
         st.image(processed_rgb, use_column_width=True)
+        
+    with col3:
+        st.subheader("Bản đồ Grad-CAM")
+        if "gradcam_image_base64" in result:
+            st.image(result["gradcam_image_base64"], use_column_width=True)
         
     st.divider()
     

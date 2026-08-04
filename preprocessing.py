@@ -267,6 +267,85 @@ def build_model(
 
 import os
 import json
+import base64
+from typing import Optional, Tuple
+import torch.nn.functional as F
+
+class AuthenticEfficientNetGradCAM:
+    """
+    Authentic Grad-CAM for EfficientNet architectures using PyTorch forward and full backward hooks.
+    Target layer: EfficientNet Features final block or CBAM.
+    """
+    def __init__(self, model: nn.Module, target_layer: Optional[nn.Module] = None):
+        self.model = model
+        self.model.eval()
+
+        if target_layer is None:
+            if hasattr(model, "cbam"):
+                target_layer = model.cbam
+            elif hasattr(model, "features"):
+                target_layer = model.features[-1]
+            else:
+                for name, module in reversed(list(model.named_modules())):
+                    if isinstance(module, (nn.Conv2d, nn.Sequential)):
+                        target_layer = module
+                        break
+
+        self.target_layer = target_layer
+        self.activations = None
+        self.gradients = None
+
+        self.handles = []
+        if self.target_layer is not None:
+            h_fwd = self.target_layer.register_forward_hook(self._forward_hook)
+            h_bwd = self.target_layer.register_full_backward_hook(self._backward_hook)
+            self.handles.extend([h_fwd, h_bwd])
+
+    def _forward_hook(self, module, input, output):
+        self.activations = output.detach()
+
+    def _backward_hook(self, module, grad_input, grad_output):
+        self.gradients = grad_output[0].detach()
+
+    def generate_cam(self, input_tensor: torch.Tensor, target_class: Optional[int] = None) -> Tuple[np.ndarray, int, float]:
+        self.model.zero_grad()
+        x = input_tensor.clone().detach().requires_grad_(True)
+
+        logits = self.model(x)
+        probs = F.softmax(logits, dim=1)
+
+        if target_class is None:
+            target_class = int(torch.argmax(logits, dim=1).item())
+
+        score = logits[0, target_class]
+        score.backward()
+
+        if self.activations is None or self.gradients is None:
+            cam = np.ones((x.shape[2], x.shape[3]), dtype=np.float32)
+            return cam, target_class, float(probs[0, target_class].item())
+
+        grads = self.gradients.cpu().data.numpy()[0]  # [C, H, W]
+        acts = self.activations.cpu().data.numpy()[0]  # [C, H, W]
+
+        weights = np.mean(grads, axis=(1, 2))  # [C]
+        cam = np.zeros(acts.shape[1:], dtype=np.float32)
+        for i, w in enumerate(weights):
+            cam += w * acts[i, :, :]
+
+        cam = np.maximum(cam, 0)  # ReLU
+        if cam.max() > cam.min():
+            cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+        else:
+            cam = np.zeros_like(cam)
+
+        h, w = x.shape[2], x.shape[3]
+        cam = cv2.resize(cam, (w, h))
+        return cam, target_class, float(probs[0, target_class].item())
+
+    def remove_hooks(self):
+        for h in self.handles:
+            h.remove()
+
 
 class DRPredictor:
     def __init__(self, weights_path: str | None = None, device: str | None = None):
@@ -291,7 +370,6 @@ class DRPredictor:
         # Disable multi-threading memory overhead in PyTorch
         torch.set_num_threads(1)
         torch.set_num_interop_threads(1)
-        torch.set_grad_enabled(False)
             
         if weights_path is None:
             weights_path = "efficientnet_b4_cbam_fold1.pth"
@@ -332,6 +410,9 @@ class DRPredictor:
         self.model.to(self.device)
         self.model.eval()
         
+        # Initialize Grad-CAM engine
+        self.cam_engine = AuthenticEfficientNetGradCAM(self.model)
+        
         # Free memory immediately to avoid Render OOM
         del state_dict
         del checkpoint
@@ -355,6 +436,27 @@ class DRPredictor:
         pred_class = int(np.argmax(probs))
         confidence = float(probs[pred_class])
         
+        # Run Grad-CAM with gradients enabled locally
+        with torch.enable_grad():
+            cam, _, _ = self.cam_engine.generate_cam(batch_tensor, target_class=pred_class)
+            
+        # Generate BGR image for overlay
+        img_bgr = load_image(image_input)
+        processed_bgr = full_preprocess_pipeline(
+            img_bgr, target_size=(224, 224), use_ben_graham=use_ben_graham
+        )
+        
+        # Apply JET color map to CAM heatmap
+        heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
+        
+        # Overlay heatmap with the preprocessed image
+        overlay = cv2.addWeighted(processed_bgr, 0.6, heatmap, 0.4, 0)
+        
+        # Encode overlay to base64
+        _, encoded_img = cv2.imencode(".jpg", overlay)
+        base64_gradcam = base64.b64encode(encoded_img).decode("utf-8")
+        gradcam_base64_str = f"data:image/jpeg;base64,{base64_gradcam}"
+        
         probabilities_dict = {
             self.class_names.get(str(i), f"Class {i}"): float(probs[i])
             for i in range(len(probs))
@@ -365,4 +467,5 @@ class DRPredictor:
             "class_name": self.class_names.get(str(pred_class), f"Class {pred_class}"),
             "confidence": confidence,
             "probabilities": probabilities_dict,
+            "gradcam_image_base64": gradcam_base64_str,
         }

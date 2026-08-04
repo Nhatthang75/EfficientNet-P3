@@ -152,6 +152,7 @@ async def predict_image(file: UploadFile = File(...)):
             },
             "clinical_guidance": clinical_info,
             "preprocessed_image_base64": f"data:image/jpeg;base64,{base64_preprocessed}",
+            "gradcam_image_base64": result.get("gradcam_image_base64", ""),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi trong quá trình xử lý ảnh: {str(e)}")
