@@ -387,9 +387,15 @@ class DRPredictor:
         else:
             self.device = torch.device(device)
             
-        # Disable multi-threading memory overhead in PyTorch
-        torch.set_num_threads(1)
-        torch.set_num_interop_threads(1)
+        # Disable multi-threading memory overhead in PyTorch safely
+        try:
+            torch.set_num_threads(1)
+        except Exception:
+            pass
+        try:
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
             
         if weights_path is None:
             weights_path = "efficientnet_b4_cbam_fold1.pth"
