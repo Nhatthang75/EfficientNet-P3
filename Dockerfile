@@ -23,8 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements_deploy.txt .
 RUN pip install --no-cache-dir -r requirements_deploy.txt
 
-# Pre-download the model weights during Docker build to save RAM and avoid network/download overhead at runtime
-RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='chrisnguyenx/EfficientNet-P3', filename='efficientnet_b4_cbam_fold1.pth', local_dir='.')"
+# Pre-download the model weights during Docker build to save RAM and avoid network/download overhead at runtime.
+# Requires HF_TOKEN as a build argument: docker build --build-arg HF_TOKEN=your_token ...
+ARG HF_TOKEN
+RUN python -c "import os; from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='chrisnguyenx/EfficientNet-P3', filename='efficientnet_b4_cbam_fold1.pth', local_dir='.', token='${HF_TOKEN}')"
 
 # Copy code
 COPY preprocessing.py .
