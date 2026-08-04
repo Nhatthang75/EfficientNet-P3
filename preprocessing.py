@@ -6,6 +6,14 @@ Hỗ trợ loại bỏ viền đen, resize giữ tỷ lệ (letterbox), lọc nh
 """
 
 from __future__ import annotations
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_MAIN_FREE"] = "1"
+os.environ["GOTO_NUM_THREADS"] = "1"
+
 import io
 from typing import Tuple, Union
 import cv2
